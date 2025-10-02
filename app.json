@@ -13,7 +13,12 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app uses the camera to attach photos to notes.",
+        "NSLocationWhenInUseUsageDescription": "This app uses location to provide location-based note reminders.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app uses location to provide location-based note reminders."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -21,10 +26,18 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": ["expo-image-picker", "expo-location", "expo-notifications"]
   }
 }
