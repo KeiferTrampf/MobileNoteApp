@@ -14,11 +14,20 @@ import {
 } from "react-native";
 import { StackNavigationProp } from "@react-navigation/stack";
 import { RouteProp } from "@react-navigation/native";
-import { RootStackParamList, Note, PhotoAttachment } from "../types";
+import {
+  RootStackParamList,
+  Note,
+  PhotoAttachment,
+  LocationData,
+} from "../types";
 import { NotesService } from "../services/NotesService";
 import { ErrorHandler } from "../utils/ErrorHandler";
 import { CameraService } from "../services/CameraService";
+import { LocationService } from "../services/LocationService";
+import { NotificationService } from "../services/NotificationService";
+import { ValidationUtils } from "../utils/validation";
 import PhotoAttachmentComponent from "../components/PhotoAttachment";
+import LocationPicker from "../components/LocationPicker";
 
 type NoteEditorScreenNavigationProp = StackNavigationProp<
   RootStackParamList,
@@ -41,6 +50,8 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
   const [category, setCategory] = useState("");
   const [tags, setTags] = useState("");
   const [photos, setPhotos] = useState<PhotoAttachment[]>([]);
+  const [location, setLocation] = useState<LocationData | undefined>(undefined);
+  const [reminderDate, setReminderDate] = useState<Date | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -68,6 +79,8 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
         setCategory(note.category || "");
         setTags(note.tags.join(", "));
         setPhotos(note.photos || []);
+        setLocation(note.location);
+        setReminderDate(note.reminder?.dateTime);
       } else {
         Alert.alert("Error", "Note not found");
         navigation.goBack();
@@ -99,14 +112,37 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
           .map((tag) => tag.trim())
           .filter((tag) => tag.length > 0),
         photos: photos,
-        location: undefined,
-        reminder: undefined,
+        location: location && location.latitude !== 0 ? location : undefined,
+        reminder: reminderDate
+          ? {
+              id: ValidationUtils.generateId(),
+              dateTime: reminderDate,
+              completed: false,
+            }
+          : undefined,
       };
 
+      let savedNote;
       if (isEditing && noteId) {
-        await NotesService.updateNote(noteId, noteData);
+        savedNote = await NotesService.updateNote(noteId, noteData);
       } else {
-        await NotesService.createNote(noteData);
+        savedNote = await NotesService.createNote(noteData);
+      }
+
+      // Schedule notification if reminder is set
+      if (reminderDate && savedNote) {
+        try {
+          const notificationId = await NotificationService.createNoteReminder(
+            savedNote,
+            reminderDate
+          );
+          if (notificationId) {
+            console.log("Reminder notification scheduled:", notificationId);
+          }
+        } catch (notificationError) {
+          console.error("Failed to schedule notification:", notificationError);
+          // Don't fail the save if notification fails
+        }
       }
 
       setHasUnsavedChanges(false);
@@ -197,6 +233,74 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
     } catch (error) {
       console.error("Error deleting photo:", error);
       Alert.alert("Error", "Failed to delete photo. Please try again.");
+    }
+  };
+
+  // Location functions
+  const handleLocationSelected = (selectedLocation: LocationData) => {
+    if (selectedLocation.latitude === 0 && selectedLocation.longitude === 0) {
+      // Location was removed
+      setLocation(undefined);
+    } else {
+      setLocation(selectedLocation);
+    }
+    setHasUnsavedChanges(true);
+  };
+
+  // Reminder functions
+  const handleSetReminder = () => {
+    const now = new Date();
+    const defaultTime = new Date(now.getTime() + 60 * 60 * 1000); // 1 hour from now
+
+    Alert.alert(
+      "Set Reminder",
+      "Choose when you'd like to be reminded about this note",
+      [
+        {
+          text: "In 1 Hour",
+          onPress: () => {
+            const reminderTime = new Date(now.getTime() + 60 * 60 * 1000);
+            setReminderDate(reminderTime);
+            setHasUnsavedChanges(true);
+          },
+        },
+        {
+          text: "In 1 Day",
+          onPress: () => {
+            const reminderTime = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+            setReminderDate(reminderTime);
+            setHasUnsavedChanges(true);
+          },
+        },
+        {
+          text: "In 1 Week",
+          onPress: () => {
+            const reminderTime = new Date(
+              now.getTime() + 7 * 24 * 60 * 60 * 1000
+            );
+            setReminderDate(reminderTime);
+            setHasUnsavedChanges(true);
+          },
+        },
+        { text: "Cancel", style: "cancel" },
+      ]
+    );
+  };
+
+  const handleRemoveReminder = () => {
+    setReminderDate(undefined);
+    setHasUnsavedChanges(true);
+  };
+
+  const handleTestNotification = async () => {
+    try {
+      await NotificationService.showTestNotification();
+      Alert.alert(
+        "Success",
+        "Test notification sent! Check your notifications."
+      );
+    } catch (error) {
+      Alert.alert("Error", "Failed to send test notification.");
     }
   };
 
@@ -317,6 +421,66 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
                   Tap "Add Photo" to attach images to your note
                 </Text>
               )}
+            </View>
+
+            {/* Location Section */}
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Location Reminder (Optional)</Text>
+              <LocationPicker
+                onLocationSelected={handleLocationSelected}
+                initialLocation={location}
+              />
+              <Text style={styles.helperText}>
+                Get reminded about this note when you visit a specific location
+              </Text>
+            </View>
+
+            {/* Time Reminder Section */}
+            <View style={styles.inputContainer}>
+              <View style={styles.reminderHeader}>
+                <Text style={styles.label}>Time Reminder (Optional)</Text>
+                <TouchableOpacity
+                  style={styles.testButton}
+                  onPress={handleTestNotification}
+                >
+                  <Text style={styles.testButtonText}>🔔 Test</Text>
+                </TouchableOpacity>
+              </View>
+
+              {!reminderDate ? (
+                <TouchableOpacity
+                  style={styles.setReminderButton}
+                  onPress={handleSetReminder}
+                >
+                  <Text style={styles.setReminderText}>⏰ Set Reminder</Text>
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.reminderInfo}>
+                  <View style={styles.reminderDetails}>
+                    <Text style={styles.reminderTitle}>⏰ Reminder Set</Text>
+                    <TouchableOpacity
+                      style={styles.removeReminderButton}
+                      onPress={handleRemoveReminder}
+                    >
+                      <Text style={styles.removeReminderText}>×</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={styles.reminderTime}>
+                    {reminderDate.toLocaleDateString()} at{" "}
+                    {reminderDate.toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </Text>
+                  <Text style={styles.reminderCountdown}>
+                    {NotificationService.formatNotificationTime(reminderDate)}
+                  </Text>
+                </View>
+              )}
+
+              <Text style={styles.helperText}>
+                Get a notification reminder at a specific time
+              </Text>
             </View>
 
             {/* Unsaved changes indicator */}
@@ -507,5 +671,80 @@ const styles = StyleSheet.create({
   },
   photosList: {
     paddingRight: 16,
+  },
+  // Reminder styles
+  reminderHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  testButton: {
+    backgroundColor: "#10b981",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  testButtonText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  setReminderButton: {
+    backgroundColor: "#f59e0b",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  setReminderText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  reminderInfo: {
+    backgroundColor: "#fef3c7",
+    padding: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#f59e0b",
+    marginBottom: 8,
+  },
+  reminderDetails: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  reminderTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#92400e",
+    flex: 1,
+  },
+  removeReminderButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#ef4444",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  removeReminderText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
+    lineHeight: 18,
+  },
+  reminderTime: {
+    fontSize: 14,
+    color: "#374151",
+    marginBottom: 4,
+  },
+  reminderCountdown: {
+    fontSize: 12,
+    color: "#6b7280",
+    fontStyle: "italic",
   },
 });

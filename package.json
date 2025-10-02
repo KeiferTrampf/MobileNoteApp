@@ -1,6 +1,7 @@
 {
   "name": "mobilenoteapp",
   "version": "1.0.0",
+  "description": "A feature-rich React Native note-taking app with camera, location, and notification capabilities",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
